@@ -10,7 +10,6 @@ def test_init_creates_signals():
     swept_sine = SweptSine(20000, 100, 1000, 4)
     assert isinstance(swept_sine.sweep, np.ndarray)
     assert isinstance(swept_sine.inverse, np.ndarray)
-    assert isinstance(swept_sine.impulse_response, np.ndarray)
 
 
 def test_init_calculations_are_deterministic():
@@ -119,16 +118,15 @@ def test_N():
     assert swept_sine.N == len(swept_sine._t) + len(swept_sine._t) - 1
 
 
-def test_deconvolve():
-    """Validate that the deconvolution and normalisation seems roughly correct."""
-    swept_sine = SweptSine(20000, 100, 1000, 4)
-    swept_sine.deconvolve(swept_sine.sweep)
-    assert np.max(np.abs(swept_sine.impulse_response)) == pytest.approx(1)
-    other_swept_sine = SweptSine(5000, 10, 500, 15)
-    other_swept_sine.deconvolve(other_swept_sine.sweep)
-    assert np.max(np.abs(other_swept_sine.impulse_response)) == pytest.approx(1)
-    other_swept_sine.deconvolve(other_swept_sine.sweep, normalise=False)
-    assert np.max(np.abs(other_swept_sine.impulse_response)) != pytest.approx(1)
+# def test_deconvolve():
+
+
+def test_deconvolve_normalisation():
+    swept_sine = SweptSine(20000, 10, 500, 1)
+    reference_impulse_response = swept_sine.deconvolve(swept_sine.sweep)
+    assert np.max(np.abs(reference_impulse_response)) == pytest.approx(1)
+    attenuated_impulse_response = swept_sine.deconvolve(swept_sine.sweep * 0.5)
+    assert np.max(np.abs(attenuated_impulse_response)) == pytest.approx(0.5)
 
 
 # def test_nth_harmonic_time_delay():

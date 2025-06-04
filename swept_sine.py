@@ -16,12 +16,11 @@ class SweptSine:
 
         self._L = self._calculate_L(self.f1, self.f2, self.target_duration)
         self._T = self._calculate_T(self.f1, self.f2, self._L)
-        self.actal_duration = self._T  # alias for the actual calculated duration
+        self.actual_duration = self._T  # alias for the actual calculated duration
         self._t = self._generate_t(self._T, self.fs)
 
         self.sweep = self._generate_sweep(self.f1, self._L, self._t)
         self.inverse = self._generate_inverse(self._t, self._L, self.sweep)
-        self.impulse_response = np.zeros(self.N)
 
         # Precompute parts of the deconvolution
         self._X_inverse = scipy.fft.rfft(self.inverse, n=self.N)
@@ -32,19 +31,6 @@ class SweptSine:
         """Create an instance from the init sweep parameters found in the filepath."""
         fs, f1, f2, duration = cls._parameters_from_wav_filepath(filepath)
         return cls(fs, f1, f2, duration)
-
-    #### Utils
-
-    def to_dBFS(self, data, floor_dB=-120):
-        """Transform a signal and scale to dBFS."""
-        y = np.abs(scipy.fft.rfft(data, n=len(data)))
-        y /= len(data) / 2  # normalise
-        y = np.clip(y, 10 ** (floor_dB / 20), None)
-        y_dB = 20 * np.log10(y)
-
-        x = np.linspace(0, self.fs / 2, num=len(y_dB))
-
-        return x, y_dB
 
     #### WAV Files
 
@@ -111,6 +97,12 @@ class SweptSine:
         inverse = np.flip(np.copy(sweep), axis=0) / env
         return inverse
 
+    #### Sweep Analysis
+
+    def sweep_frequency_at_time(self, t):
+        """Calculate the frequency of the sweep at a given time (Novak et al. 2015, eq. 35)."""
+        return self.f1 * np.exp(t / self._L)
+
     #### Analysis
 
     @property
@@ -124,15 +116,28 @@ class SweptSine:
         impulse_response = scipy.fft.irfft(Y * self._X_inverse, n=N)
         return impulse_response
 
-    def deconvolve(self, measurement, normalise=True):
+    def deconvolve(self, measurement):
         """Deconvolve the measurement with the inverse filter and optionally normalise the output impulse response."""
 
-        self.impulse_response = self._deconvolution(measurement)
+        impulse_response = self._deconvolution(measurement)
 
-        if normalise:
-            self.impulse_response /= np.max(np.abs(self._reference_impulse_response))
+        impulse_response /= np.max(
+            np.abs(self._reference_impulse_response)
+        )  # normalise
 
-        return self.impulse_response
+        return impulse_response
+
+    def impulse_response_frequency_response(self, impulse_response, floor_dB=-120):
+        frequency_response = np.abs(
+            scipy.fft.rfft(impulse_response, n=len(impulse_response))
+        )
+
+        frequency_response = np.clip(frequency_response, 10 ** (floor_dB / 20), None)
+        frequency_response_dB = 20 * np.log10(frequency_response)
+
+        bin_frequencies = np.linspace(0, self.fs / 2, num=len(frequency_response_dB))
+
+        return bin_frequencies, frequency_response_dB
 
     def nth_harmonic_time_delay(self, n):
         """Calculate the time delay in seconds for the nth harmonic (Novak et al. 2015, eq. 34)."""
@@ -143,15 +148,11 @@ class SweptSine:
         delta_t = self.nth_harmonic_time_delay(n)
         return int(np.round(delta_t * self.fs))
 
-    def sweep_frequency_at_time(self, t):
-        """Calculate the frequency of the sweep at a given time (Novak et al. 2015, eq. 35)."""
-        return self.f1 * np.exp(t / self._L)
-
-    def get_fundamental_impulse_response(self):
+    def get_fundamental_impulse_response(self, impulse_response):
         """Get only the portion of the impulse response after t=0 (single sided)."""
-        return self.impulse_response[len(self.impulse_response) // 2 :]
+        return impulse_response[len(impulse_response) // 2 :]
 
-    def get_harmonic_impulse_response(self, n):
+    def get_harmonic_impulse_response(self, impulse_response, n):
         """Get the (centred) impulse response of the nth harmonic."""
         harmonic_idx = self.N // 2 - self.nth_harmonic_sample_delay(n)
         next_harmonic_idx = self.N // 2 - self.nth_harmonic_sample_delay(n + 1)
@@ -160,4 +161,4 @@ class SweptSine:
         start_idx = harmonic_idx - max_half_window
         end_idx = harmonic_idx + max_half_window
 
-        return self.impulse_response[start_idx:end_idx]
+        return impulse_response[start_idx:end_idx]
