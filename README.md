@@ -9,7 +9,7 @@ A python implementation of the synchronised swept sine based on [Novak et al. 20
 
     my_swept_sine = SweptSine(fs=48000, f1=20, f2=20000, duration=5)
 
-    measurement = sd.playrec(my_swept_sine.sweep, my_swept_sine.fs)
+    measurement = sd.playrec(my_swept_sine.sweep, my_swept_sine.fs, channels=1, blocking=True)
 
     impulse_response = my_swept_sine.deconvolve(measurement)
 

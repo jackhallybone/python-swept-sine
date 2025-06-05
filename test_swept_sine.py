@@ -13,13 +13,13 @@ def test_init_creates_signals():
 
 
 def test_init_calculations_are_deterministic():
-    """Verify that the init arguments and calculations are reproducible."""
+    """Verify that an instance can be re-created from its parameters/arguments."""
     swept_sine = SweptSine(20000, 100, 1000, 4)
     assert_array_equal(swept_sine.sweep, SweptSine(20000, 100, 1000, 4).sweep)
 
 
 def test_init_from_sweep_wav(tmp_path):
-    """Verify that an instance can be recreated from the parameters in a filename."""
+    """Verify that an instance can be re-created from the parameters in a filename."""
     swept_sine = SweptSine(20000, 100, 1000, 4)
     filepath = swept_sine.save_sweep_as_wav(path=tmp_path, prefix="init_test")
     new_swept_sine = SweptSine.init_from_sweep_wav(filepath)
@@ -29,7 +29,23 @@ def test_init_from_sweep_wav(tmp_path):
 #### Utils
 
 
-# def test_to_dBFS():
+def enforce_2d_row_major():
+    """Verify that audio data can be forced into 2D (samples, channels) shape."""
+    assert SweptSine.enforce_2d_row_major(np.ones(48000)).shape == (48000, 1)  # 1D mono
+    assert SweptSine.enforce_2d_row_major(np.ones((48000, 1))).shape == (
+        48000,
+        1,
+    )  # 2D mono
+    assert SweptSine.enforce_2d_row_major(np.ones((2, 48000))).shape == (
+        48000,
+        2,
+    )  # 2D swapped
+    assert SweptSine.enforce_2d_row_major(np.ones((48000, 2))).shape == (
+        48000,
+        2,
+    )  # 2D correct
+    with pytest.raises(ValueError):
+        SweptSine.enforce_2d_row_major(np.ones((48000, 1, 1)))  # 3D
 
 
 #### WAV Files
@@ -51,19 +67,16 @@ def test__parameters_from_wav_filepath():
     assert SweptSine._parameters_from_wav_filepath(filepath) == (20000, 100, 1000, 4)
 
 
-def test_save_sweep_as_wav(tmp_path):
-    """Verify that saving to wav maintains the sweep signal format, etc."""
-    from scipy.io import wavfile
-
+def test_save_sweep_as_wav_and__read_from_wav(tmp_path):
+    """Verify that saving and reading from to wav maintains the sweep signal format, etc."""
     swept_sine = SweptSine(20000, 100, 1000, 4)
     filepath = swept_sine.save_sweep_as_wav(path=tmp_path, prefix="save_test")
-    fs, data = wavfile.read(filepath)
-    assert fs == swept_sine.fs
-    assert_array_equal(data, swept_sine.sweep)  # sweeps match
+    data = swept_sine._read_from_wav(filepath)  # enforces 2D (samples, channels) shape
+    assert_array_equal(data, swept_sine.sweep)
 
 
 def test_deconvolve_from_wav(tmp_path):
-    """Verify that measurements can be deconvolved directly from a wav file."""
+    """Verify that measurements deconvolved directly and from a wav file are identical."""
     swept_sine = SweptSine(20000, 100, 1000, 4)
     filepath = swept_sine.save_sweep_as_wav(path=tmp_path, prefix="deconvolve_test")
     wav_impulse_response = swept_sine.deconvolve_from_wav(filepath)
@@ -109,29 +122,7 @@ def test_sweep_harmonic_phase_synchronicity():
         )  # zero-cross
 
 
-#### Analysis
-
-
-def test_N():
-    swept_sine = SweptSine(20000, 10, 500, 1)
-    assert len(swept_sine.sweep) == len(swept_sine.inverse) == len(swept_sine._t)
-    assert swept_sine.N == len(swept_sine._t) + len(swept_sine._t) - 1
-
-
-# def test_deconvolve():
-
-
-def test_deconvolve_normalisation():
-    swept_sine = SweptSine(20000, 10, 500, 1)
-    reference_impulse_response = swept_sine.deconvolve(swept_sine.sweep)
-    assert np.max(np.abs(reference_impulse_response)) == pytest.approx(1)
-    attenuated_impulse_response = swept_sine.deconvolve(swept_sine.sweep * 0.5)
-    assert np.max(np.abs(attenuated_impulse_response)) == pytest.approx(0.5)
-
-
-# def test_nth_harmonic_time_delay():
-
-# def test_nth_harmonic_sample_delay():
+#### Sweep Analysis
 
 
 def test_sweep_frequency_at_time():
@@ -143,6 +134,37 @@ def test_sweep_frequency_at_time():
     delta_t_f3 = swept_sine.nth_harmonic_time_delay(3)
     assert swept_sine.sweep_frequency_at_time(delta_t_f3) == pytest.approx(f1 * 3)
 
+
+#### Analysis
+
+
+def test_N():
+    swept_sine = SweptSine(20000, 10, 500, 1)
+    assert len(swept_sine.sweep) == len(swept_sine.inverse) == len(swept_sine._t)
+    assert swept_sine.N == len(swept_sine._t) + len(swept_sine._t) - 1
+
+
+def test__deconvolution():
+    """Verify (only) that the output shape of the deconvolution is correct."""
+    swept_sine = SweptSine(20000, 10, 500, 1)
+    impulse_response = swept_sine._deconvolution(swept_sine.sweep)
+    assert impulse_response.shape == (swept_sine.N, 1)
+
+
+def test_deconvolve():
+    """Verify (only) that the normalisation of the deconvolution is correct."""
+    swept_sine = SweptSine(20000, 10, 500, 1)
+    reference_impulse_response = swept_sine.deconvolve(swept_sine.sweep)
+    assert np.max(np.abs(reference_impulse_response)) == pytest.approx(1)
+    attenuated_impulse_response = swept_sine.deconvolve(swept_sine.sweep * 0.5)
+    assert np.max(np.abs(attenuated_impulse_response)) == pytest.approx(0.5)
+
+
+# def test_impulse_response_frequency_response():
+
+# def test_nth_harmonic_time_delay():
+
+# def test_nth_harmonic_sample_delay():
 
 # def test_get_fundamental_impulse_response():
 

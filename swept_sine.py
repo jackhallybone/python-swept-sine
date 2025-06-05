@@ -14,16 +14,24 @@ class SweptSine:
         self.f2 = f2
         self.target_duration = duration  # save the target duration
 
+        # Calculate the sweep from the user provided parameters
         self._L = self._calculate_L(self.f1, self.f2, self.target_duration)
         self._T = self._calculate_T(self.f1, self.f2, self._L)
         self.actual_duration = self._T  # alias for the actual calculated duration
-        self._t = self._generate_t(self._T, self.fs)
 
+        # Create a time series of shape (samples, channels) for creating the signals
+        self._t = self._generate_t(self._T, self.fs)
+        self._t = self.enforce_2d_row_major(self._t)
+
+        # self._t = np.repeat(self._t, 10, axis=1) # example to make a 10 channel system
+
+        # Generate the sweep and inverse filter signals
         self.sweep = self._generate_sweep(self.f1, self._L, self._t)
+
         self.inverse = self._generate_inverse(self._t, self._L, self.sweep)
 
-        # Precompute parts of the deconvolution
-        self._X_inverse = scipy.fft.rfft(self.inverse, n=self.N)
+        # Precompute components of the deconvolution to save time later
+        self._X_inverse = scipy.fft.rfft(self.inverse, n=self.N, axis=0)
         self._reference_impulse_response = self._deconvolution(self.sweep)
 
     @classmethod
@@ -31,6 +39,22 @@ class SweptSine:
         """Create an instance from the init sweep parameters found in the filepath."""
         fs, f1, f2, duration = cls._parameters_from_wav_filepath(filepath)
         return cls(fs, f1, f2, duration)
+
+    #### Utils
+
+    @staticmethod
+    def enforce_2d_row_major(data):
+        """Enforce a signal shape of (samples, channels), including for mono."""
+        data = np.asarray(data)
+        if data.ndim == 1:  # Expand 1D mono to 2D mono (samples, 1)
+            return data[:, np.newaxis]
+        elif data.ndim == 2:
+            rows, columns = data.shape
+            if rows < columns:  # likely (channels, samples) so transpose
+                return data.transpose()
+            return data
+        else:
+            raise ValueError("Audio data must be be 1D or 2D.")
 
     #### WAV Files
 
@@ -49,18 +73,27 @@ class SweptSine:
         return fs, f1, f2, duration
 
     def save_sweep_as_wav(self, path=".", prefix="sweep"):
-        """Save the sweep signal to wav file with the parameters appended to the filename."""
+        """Save the sweep signal to a wav file with the parameters appended to the filename."""
         filepath = self._construct_wav_filepath(path, prefix)
         wavfile.write(filepath, self.fs, self.sweep)
         return filepath
 
-    def deconvolve_from_wav(self, filepath):
+    def _read_from_wav(self, filepath):
+        """Read an audio file from a wav file and enforce 2D (samples, channels) shape."""
         filepath = Path(filepath)
         fs, measurement = wavfile.read(filepath)
         if fs != self.fs:
             raise ValueError(
                 f"Measurement {filepath} sample rate ({fs}) does not match the sweep sample rate ({self.fs})."
             )
+        measurement = self.enforce_2d_row_major(
+            measurement
+        )  # wavfile.read returns mono as 1D
+        return measurement
+
+    def deconvolve_from_wav(self, filepath):
+        """Read measurement data from a wav file and deconvolve it"""
+        measurement = self._read_from_wav(filepath)
         return self.deconvolve(measurement)
 
     #### Sweep Parameters
@@ -112,12 +145,14 @@ class SweptSine:
     def _deconvolution(self, measurement):
         """Perform the matched linear deconvolution using the precomputed inverse filter (X~)."""
         N = self.N
-        Y = scipy.fft.rfft(measurement, n=N)
-        impulse_response = scipy.fft.irfft(Y * self._X_inverse, n=N)
+        Y = scipy.fft.rfft(measurement, n=N, axis=0)
+        impulse_response = scipy.fft.irfft(Y * self._X_inverse, n=N, axis=0)
         return impulse_response
 
     def deconvolve(self, measurement):
         """Deconvolve the measurement with the inverse filter and optionally normalise the output impulse response."""
+
+        measurement = self.enforce_2d_row_major(measurement)
 
         impulse_response = self._deconvolution(measurement)
 
@@ -148,7 +183,8 @@ class SweptSine:
         delta_t = self.nth_harmonic_time_delay(n)
         return int(np.round(delta_t * self.fs))
 
-    def get_fundamental_impulse_response(self, impulse_response):
+    @staticmethod
+    def get_fundamental_impulse_response(impulse_response):
         """Get only the portion of the impulse response after t=0 (single sided)."""
         return impulse_response[len(impulse_response) // 2 :]
 
