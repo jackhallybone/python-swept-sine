@@ -15,15 +15,19 @@ def test_init_creates_signals():
 def test_init_calculations_are_deterministic():
     """Verify that an instance can be re-created from its parameters/arguments."""
     swept_sine = SweptSine(20000, 100, 1000, 4)
-    assert_array_equal(swept_sine.sweep, SweptSine(20000, 100, 1000, 4).sweep)
+    assert_array_equal(SweptSine(20000, 100, 1000, 4).sweep, swept_sine.sweep)
 
 
 def test_init_from_sweep_wav(tmp_path):
     """Verify that an instance can be re-created from the parameters in a filename."""
-    swept_sine = SweptSine(20000, 100, 1000, 4)
+    swept_sine = SweptSine(20000, 100, 1000, 4, -6, 1, 2, "linear", 2, 2)
     filepath = swept_sine.save_sweep_as_wav(path=tmp_path, prefix="init_test")
     new_swept_sine = SweptSine.init_from_sweep_wav(filepath)
-    assert_array_equal(new_swept_sine.sweep, swept_sine.sweep)  # sweeps match
+    assert all(
+        getattr(swept_sine, key) == getattr(new_swept_sine, key)
+        for key in SweptSine.re_init_parameters
+    )
+    assert_array_equal(new_swept_sine.sweep, swept_sine.sweep)
 
 
 #### Utils
@@ -31,7 +35,10 @@ def test_init_from_sweep_wav(tmp_path):
 
 def test__enforce_2d_row_major():
     """Verify that audio data can be forced into 2D (samples, channels) shape."""
-    assert SweptSine._enforce_2d_row_major(np.ones(48000)).shape == (48000, 1)  # 1D mono
+    assert SweptSine._enforce_2d_row_major(np.ones(48000)).shape == (
+        48000,
+        1,
+    )  # 1D mono
     assert SweptSine._enforce_2d_row_major(np.ones((48000, 1))).shape == (
         48000,
         1,
@@ -48,34 +55,51 @@ def test__enforce_2d_row_major():
         SweptSine._enforce_2d_row_major(np.ones((48000, 1, 1)))  # 3D
 
 
+def test__scale_by_dBFS():
+    """Verify that the sweep, and the resulting impulse response can be scaled by a dBFS value."""
+    swept_sine = SweptSine(20000, 100, 1000, 4, sweep_dBFS=-6)
+    assert np.max(np.abs(swept_sine.sweep)) == pytest.approx(0.5, abs=0.01)
+    assert np.max(swept_sine.deconvolve(swept_sine.sweep)) == pytest.approx(
+        0.5, abs=0.01
+    )
+
+
 def test__seconds_to_samples():
     """Check conversion from seconds to samples using sampling rate."""
     assert SweptSine._seconds_to_samples(0.5, 48000) == 24000
+
 
 def test__samples_to_seconds():
     """Check conversion from a number of samples to seconds using sampling rate."""
     assert SweptSine._samples_to_seconds(24000, 48000) == 0.5
 
+
 def test__fade_in_out():
     """Verify that a signal can be faded in and out."""
     swept_sine = SweptSine(20000, 100, 1000, 4)
-    test_data = np.ones(20000) # 1 second of ones
-    faded_data = swept_sine._fade_in_out(test_data, 0.5, 0.5, curve="linear")
+    test_data = np.ones(20000)  # 1 second of ones
+    faded_data = swept_sine._fade_in_out(test_data, 0.5, 0.5, fade_shape="linear")
     assert faded_data[0, 0] == 0
     assert faded_data[10000, 0] == 1
     assert faded_data[-1, 0] == 0
 
-test_data = [
+
+data_test__create_fade_envelope = [
     (100, 0, 1, "linear"),
     (100, 1, 0, "linear"),
     (100, 0, 1, "cosine"),
-    (100, 1, 0, "cosine"),]
-@pytest.mark.parametrize("length, start, end, curve", test_data)
-def test__fade_curve(length, start, end, curve):
+    (100, 1, 0, "cosine"),
+]
+
+
+@pytest.mark.parametrize(
+    "length, start, end, fade_shape", data_test__create_fade_envelope
+)
+def test__create_fade_envelope(length, start, end, fade_shape):
     """Verify drawing curves with defined start and end points"""
-    curve = SweptSine._fade_curve(length, start, end, curve)
+    curve = SweptSine._create_fade_envelope(length, start, end, fade_shape)
     assert curve[0] == start
-    assert curve[length//2] == pytest.approx(np.abs(start-end)/2, 0.1)
+    assert curve[length // 2] == pytest.approx(np.abs(start - end) / 2, 0.1)
     assert curve[-1] == end
 
 
@@ -86,7 +110,6 @@ def test__zero_pad_start_end():
     assert padded_test_data.shape == (70000, 1)
 
 
-
 #### WAV Files
 
 
@@ -94,16 +117,29 @@ def test__construct_wav_filepath():
     """Verify that a wav filename can be constructed including the sweep parameters."""
     from pathlib import Path
 
-    swept_sine = SweptSine(20000, 100, 1000, 4)
+    swept_sine = SweptSine(20000, 100, 1000, 4, -6, 1, 2, "linear", 2, 2)
     filepath = swept_sine._construct_wav_filepath(path="test/path", prefix="my_sweep")
     assert isinstance(filepath, Path)
-    assert filepath == Path(f"test/path/my_sweep-20000-100-1000-4.wav")
+    assert filepath == Path(
+        f"test/path/my_sweep-params_20000_100_1000_4_-6_1_2_linear_2_2.wav"
+    )
 
 
 def test__parameters_from_wav_filepath():
     """Verify that the sweep parameters can be read from a properly formatted filename."""
-    filepath = "test/path/my_sweep-20000-100-1000-4.wav"
-    assert SweptSine._parameters_from_wav_filepath(filepath) == (20000, 100, 1000, 4)
+    filepath = "test/path/my_sweep-params_20000_100_1000_4_-6_1_2_linear_2_2.wav"
+    assert SweptSine._parameters_from_wav_filepath(filepath) == [
+        20000,
+        100,
+        1000,
+        4,
+        -6,
+        1,
+        2,
+        "linear",
+        2,
+        2,
+    ]
 
 
 def test_save_sweep_as_wav_and__read_from_wav(tmp_path):
@@ -134,8 +170,7 @@ def test_deconvolve_from_wav(tmp_path):
 # def test__generate_sweep():
 
 # def test__generate_inverse():
-# As per Farina 2000
-# 20*log10(_inverse_envelope(t, L))[-1] == -6*np.log2(f2/f1)
+# As per Farina 2000: 20*log10(_inverse_envelope(t, L))[-1] == -6*np.log2(f2/f1)
 
 
 def test_sweep_start_end_phase_synchronicity():

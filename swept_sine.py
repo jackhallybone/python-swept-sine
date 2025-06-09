@@ -6,19 +6,47 @@ from scipy.io import wavfile
 
 
 class SweptSine:
+    """List of the parameters/arguments required to re-create a sweep."""
 
-    def __init__(self, fs, f1, f2, duration, fade_in=0, fade_out=0, fade_profile="cosine", pad_start=0, pad_end=0):
+    re_init_parameters = {
+        "fs": int,
+        "f1": float,
+        "f2": float,
+        "target_duration": float,
+        "sweep_dBFS": float,
+        "fade_in": float,
+        "fade_out": float,
+        "fade_shape": str,
+        "pad_start": float,
+        "pad_end": float,
+    }
 
-        if f2 <= f1: # https://www.ap.com/blog/why-are-chirps-always-swept-from-low-to-high
+    def __init__(
+        self,
+        fs,
+        f1,
+        f2,
+        duration,
+        sweep_dBFS=0,
+        fade_in=0,
+        fade_out=0,
+        fade_shape="cosine",
+        pad_start=0,
+        pad_end=0,
+    ):
+
+        if f2 <= f1:
+            # https://www.ap.com/blog/why-are-chirps-always-swept-from-low-to-high
             raise ValueError("Sweep must be high to low (f2>f1)")
 
         self.fs = fs
         self.f1 = f1
         self.f2 = f2
         self.target_duration = duration  # save the target duration
+        self.sweep_dBFS = sweep_dBFS
         self.fade_in = fade_in
         self.fade_out = fade_out
-        self.fade_profile = fade_profile
+        self.fade_shape = fade_shape
         self.pad_start = pad_start
         self.pad_end = pad_end
 
@@ -35,24 +63,34 @@ class SweptSine:
 
         # Generate the sweep, optionally with fades, and the inverse filter signals
         self.sweep = self._generate_sweep(self.f1, self._L, self._t)
-        if self.fade_in or self.fade_out:
-            self.sweep = self._fade_in_out(self.sweep, self.fade_in, self.fade_out, self.fade_profile)
+        if self.fade_in > 0 or self.fade_out > 0:
+            self.sweep = self._fade_in_out(
+                self.sweep, self.fade_in, self.fade_out, self.fade_shape
+            )
         self.inverse = self._generate_inverse(self._t, self._L, self.sweep)
 
         # Apply and zero padding to the sweep and apply it to the inverse backwards
-        if self.pad_start or self.pad_end:
-            self.sweep = self._zero_pad_start_end(self.sweep, self.pad_start, self.pad_end)
-            self.inverse = self._zero_pad_start_end(self.inverse, self.pad_end, self.pad_start)
+        if self.pad_start > 0 or self.pad_end > 0:
+            self.sweep = self._zero_pad_start_end(
+                self.sweep, self.pad_start, self.pad_end
+            )
+            self.inverse = self._zero_pad_start_end(
+                self.inverse, self.pad_end, self.pad_start
+            )
 
         # Precompute components of the deconvolution to save time later
         self._X_inverse = scipy.fft.rfft(self.inverse, n=self.N, axis=0)
         self._reference_impulse_response = self._deconvolution(self.sweep)
 
+        # Scale sweep to dBFS
+        if self.sweep_dBFS != 0:
+            self.sweep = self._scale_by_dBFS(self.sweep, self.sweep_dBFS)
+
     @classmethod
     def init_from_sweep_wav(cls, filepath):
         """Create an instance from the init sweep parameters found in the filepath."""
-        fs, f1, f2, duration = cls._parameters_from_wav_filepath(filepath)
-        return cls(fs, f1, f2, duration)
+        params = cls._parameters_from_wav_filepath(filepath)
+        return cls(*params)
 
     #### Utils
 
@@ -71,16 +109,20 @@ class SweptSine:
             raise ValueError("Audio data must be be 1D or 2D.")
 
     @staticmethod
+    def _scale_by_dBFS(data, dBFS):
+        return data * np.power(10, dBFS / 20)
+
+    @staticmethod
     def _seconds_to_samples(t, fs):
         """Convert a duration in seconds to a number of samples at a sampling rate."""
-        return round(t*fs)
+        return round(t * fs)
 
     @staticmethod
     def _samples_to_seconds(length, fs):
         """Convert a number of samples at a sampling rate to a duration in seconds."""
-        return length/fs
+        return length / fs
 
-    def _fade_in_out(self, data, fade_in, fade_out, curve="cosine"):
+    def _fade_in_out(self, data, fade_in, fade_out, fade_shape="cosine"):
         """Fade a signal in from 0 and/or out to 0."""
         cls = type(self)
         fade_in_length = cls._seconds_to_samples(fade_in, self.fs)
@@ -94,25 +136,31 @@ class SweptSine:
 
         envelope = np.ones(data.shape[0])
         if fade_in_length > 0:
-            envelope[:fade_in_length] = cls._fade_curve(fade_in_length, 0, 1, curve)
+            envelope[:fade_in_length] = cls._create_fade_envelope(
+                fade_in_length, 0, 1, fade_shape
+            )
         if fade_out_length > 0:
-            envelope[-fade_out_length:] = cls._fade_curve(fade_out_length, 1, 0, curve)
+            envelope[-fade_out_length:] = cls._create_fade_envelope(
+                fade_out_length, 1, 0, fade_shape
+            )
 
         faded_data = data * envelope[:, np.newaxis]
         return faded_data
 
     @staticmethod
-    def _fade_curve(length, start, end, profile):
-        """Draw a curve envelope for fading a signal."""
-        if profile == "linear":
+    def _create_fade_envelope(length, start, end, fade_shape):
+        """Draw a shaped envelope for fading a signal."""
+        if fade_shape == "linear":
             return np.linspace(start, end, length, endpoint=True)
-        elif profile == "cosine":
+        elif fade_shape == "cosine":
             x = np.linspace(0, 1, length)
             curve = 0.5 * (1 - np.cos(np.pi * x))
             curve = curve * (end - start) + start
             return curve
         else:
-            raise ValueError(f"Profile must be 'linear' or 'cosine' not '{profile}'.")
+            raise ValueError(
+                f"Fade shape must be 'linear' or 'cosine' not '{fade_shape}'."
+            )
 
     def _zero_pad_start_end(self, data, pad_start, pad_end):
         """Zero pad the start and end of a signal."""
@@ -124,7 +172,7 @@ class SweptSine:
             data,
             pad_width=((pad_start_length, pad_end_length), (0, 0)),
             mode="constant",
-            constant_values=0
+            constant_values=0,
         )
         return padded_data
 
@@ -132,17 +180,22 @@ class SweptSine:
 
     def _construct_wav_filepath(self, path=".", prefix="sweep"):
         """Create a filepath with the sweep parameters appended to the filename."""
-        parameters = f"{self.fs}-{self.f1}-{self.f2}-{self.target_duration}"
-        filename = f"{prefix}-{parameters}.wav"
+        param_suffix = "_".join(str(getattr(self, p)) for p in self.re_init_parameters)
+        filename = f"{prefix}-params_{param_suffix}.wav"
         filepath = Path(path) / filename
         return filepath
 
-    @staticmethod
-    def _parameters_from_wav_filepath(filepath):
+    @classmethod
+    def _parameters_from_wav_filepath(cls, filepath):
         """Extract the sweep parameters from a filepath created with `_construct_wav_filepath()`."""
         filename = Path(filepath).stem
-        fs, f1, f2, duration = map(float, filename.split("-")[-4:])
-        return fs, f1, f2, duration
+        parts = filename.split("_")
+        params = parts[-len(cls.re_init_parameters) :]
+        cast_params = [
+            to_type(param)
+            for to_type, param in zip(cls.re_init_parameters.values(), params)
+        ]
+        return cast_params
 
     def save_sweep_as_wav(self, path=".", prefix="sweep"):
         """Save the sweep signal to a wav file with the parameters appended to the filename."""
@@ -253,7 +306,7 @@ class SweptSine:
     def nth_harmonic_sample_delay(self, n):
         """Calculate the time delay in samples at fs for the nth harmonic."""
         delta_t = self.nth_harmonic_time_delay(n)
-        return int(np.round(delta_t * self.fs))
+        return type(self)._seconds_to_samples(delta_t, self.fs)
 
     @staticmethod
     def get_fundamental_impulse_response(impulse_response):

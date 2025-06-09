@@ -6,17 +6,22 @@ A python implementation of the synchronised swept sine based on [Novak et al. 20
 ## Parameters
 
 Required:
+
 - `fs`: Sampling rate
 - `f1`: Starting (lower) frequency in Hz
 - `f2`: Ending (higher) frequency in HZ
 - `duration`: Desired duration of the sweep in seconds
 
 Optional:
+
+- `sweep_dBFS`: Amplitude of the sweep in dBFS. Default=0
 - `fade_in`: Duration of a fade in in seconds. Default=0
 - `fade_out`: Duration of a fade out in seconds. Default=0
-- `fade_profile`: Shape of the fade in/out curve. One of: `"linear"` or `"cosine"`. Default="cosine".
+- `fade_shape`: Shape of the fade in/out curve. One of: `"linear"` or `"cosine"`. Default="cosine".
 - `pad_start`: Duration of zero padding at the start in seconds. Default=0
 - `pad_end`: Duration of zero padding at the end in seconds. Default=0
+
+Fading can be helpful to manage ringing in resulting impulse responses. Padding can be helpful to account for measurement latency and to capture the full reverberant decay.
 
 ### Duration
 
@@ -54,14 +59,14 @@ impulse_response = my_swept_sine.deconvolve(measurement)
 
 ## Example of a measurement elsewhere (eg in a DAW)
 
-Create the `SweptSine` instance as normal then save the sweep signal to a wav file using `save_sweep_as_wav()`. This will automatically append the sweep parameters to the filename for reference during devonvolution later.
+Create the `SweptSine` instance as normal then save the sweep signal to a wav file using `save_sweep_as_wav()`. This will automatically append the sweep parameters (including the optional/defaults) to the filename for reference during devonvolution later.
 
 ```python
 my_swept_sine = SweptSine(fs=48000, f1=20, f2=20000, duration=5)
 
 my_swept_sine.save_sweep_as_wav(path="sweeps", prefix="my_sweep_name")
 
-# writes the file: "sweeps/my_sweep_name-48000-20-20000-5.wav"
+# writes a file called "sweeps/my_sweep_name-params_20000_100_1000_4_0_0_0_cosine_0_0.wav"
 ```
 
 The sweep signal can be used for measurements elsewhere (eg in a DAW), and then devonvolved by referencing a `SweptSine` instance with the same parameters.
@@ -80,18 +85,25 @@ impulse_response = my_swept_sine.deconvolve_from_wav("my_measurement.wav")
 For convenience, `SweptSine` can be instantiated from a sweep filename using `init_from_sweep_wav()` which extracts the sweep parameters from filenames created with `save_sweep_as_wav()`.
 
 ```python
-my_swept_sine = SweptSine.init_from_sweep_wav("my_sweep_name-48000-20-20000-5.wav")
+my_swept_sine = SweptSine.init_from_sweep_wav(
+    "my_sweep_name-params_20000_100_1000_4_0_0_0_cosine_0_0.wav"
+)
 ```
 
 is equivalent to
 
 ```python
-my_swept_sine = SweptSine(fs=48000, f1=20, f2=20000, duration=5)
+my_swept_sine = SweptSine(
+    fs=48000, f1=20, f2=20000, duration=5,
+    sweep_dBFS=0, fade_in=0, fade_out=0, fade_shape="cosine", pad_start=0, pad_end=0
+)
 ```
 
 So, if measurements have been made elsewhere then they can be processed directly from the wav files and their filenames:
 
 ```python
-my_swept_sine = SweptSine.init_from_sweep_wav("my_sweep_name-48000-20-20000-5.wav")
+my_swept_sine = SweptSine.init_from_sweep_wav(
+    "my_sweep_name-params_20000_100_1000_4_0_0_0_cosine_0_0.wav.wav"
+)
 impulse_response = my_swept_sine.deconvolve_from_wav("my_measurement.wav")
 ```
