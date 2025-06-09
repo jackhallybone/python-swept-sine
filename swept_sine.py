@@ -7,12 +7,20 @@ from scipy.io import wavfile
 
 class SweptSine:
 
-    def __init__(self, fs, f1, f2, duration):
+    def __init__(self, fs, f1, f2, duration, fade_in=0, fade_out=0, fade_profile="cosine", pad_start=0, pad_end=0):
+
+        if f2 <= f1: # https://www.ap.com/blog/why-are-chirps-always-swept-from-low-to-high
+            raise ValueError("Sweep must be high to low (f2>f1)")
 
         self.fs = fs
         self.f1 = f1
         self.f2 = f2
         self.target_duration = duration  # save the target duration
+        self.fade_in = fade_in
+        self.fade_out = fade_out
+        self.fade_profile = fade_profile
+        self.pad_start = pad_start
+        self.pad_end = pad_end
 
         # Calculate the sweep from the user provided parameters
         self._L = self._calculate_L(self.f1, self.f2, self.target_duration)
@@ -21,14 +29,20 @@ class SweptSine:
 
         # Create a time series of shape (samples, channels) for creating the signals
         self._t = self._generate_t(self._T, self.fs)
-        self._t = self.enforce_2d_row_major(self._t)
+        self._t = self._enforce_2d_row_major(self._t)
 
         # self._t = np.repeat(self._t, 10, axis=1) # example to make a 10 channel system
 
-        # Generate the sweep and inverse filter signals
+        # Generate the sweep, optionally with fades, and the inverse filter signals
         self.sweep = self._generate_sweep(self.f1, self._L, self._t)
-
+        if self.fade_in or self.fade_out:
+            self.sweep = self._fade_in_out(self.sweep, self.fade_in, self.fade_out, self.fade_profile)
         self.inverse = self._generate_inverse(self._t, self._L, self.sweep)
+
+        # Apply and zero padding to the sweep and apply it to the inverse backwards
+        if self.pad_start or self.pad_end:
+            self.sweep = self._zero_pad_start_end(self.sweep, self.pad_start, self.pad_end)
+            self.inverse = self._zero_pad_start_end(self.inverse, self.pad_end, self.pad_start)
 
         # Precompute components of the deconvolution to save time later
         self._X_inverse = scipy.fft.rfft(self.inverse, n=self.N, axis=0)
@@ -43,7 +57,7 @@ class SweptSine:
     #### Utils
 
     @staticmethod
-    def enforce_2d_row_major(data):
+    def _enforce_2d_row_major(data):
         """Enforce a signal shape of (samples, channels), including for mono."""
         data = np.asarray(data)
         if data.ndim == 1:  # Expand 1D mono to 2D mono (samples, 1)
@@ -55,6 +69,64 @@ class SweptSine:
             return data
         else:
             raise ValueError("Audio data must be be 1D or 2D.")
+
+    @staticmethod
+    def _seconds_to_samples(t, fs):
+        """Convert a duration in seconds to a number of samples at a sampling rate."""
+        return round(t*fs)
+
+    @staticmethod
+    def _samples_to_seconds(length, fs):
+        """Convert a number of samples at a sampling rate to a duration in seconds."""
+        return length/fs
+
+    def _fade_in_out(self, data, fade_in, fade_out, curve="cosine"):
+        """Fade a signal in from 0 and/or out to 0."""
+        cls = type(self)
+        fade_in_length = cls._seconds_to_samples(fade_in, self.fs)
+        fade_out_length = cls._seconds_to_samples(fade_out, self.fs)
+
+        if fade_in_length + fade_out_length > data.shape[0]:
+            raise ValueError(
+                f"Fade in + fade out ({fade_in + fade_out}s) exceeds signal length "
+                f"({cls._samples_to_seconds(data.shape[0], self.fs)}s)."
+            )
+
+        envelope = np.ones(data.shape[0])
+        if fade_in_length > 0:
+            envelope[:fade_in_length] = cls._fade_curve(fade_in_length, 0, 1, curve)
+        if fade_out_length > 0:
+            envelope[-fade_out_length:] = cls._fade_curve(fade_out_length, 1, 0, curve)
+
+        faded_data = data * envelope[:, np.newaxis]
+        return faded_data
+
+    @staticmethod
+    def _fade_curve(length, start, end, profile):
+        """Draw a curve envelope for fading a signal."""
+        if profile == "linear":
+            return np.linspace(start, end, length, endpoint=True)
+        elif profile == "cosine":
+            x = np.linspace(0, 1, length)
+            curve = 0.5 * (1 - np.cos(np.pi * x))
+            curve = curve * (end - start) + start
+            return curve
+        else:
+            raise ValueError(f"Profile must be 'linear' or 'cosine' not '{profile}'.")
+
+    def _zero_pad_start_end(self, data, pad_start, pad_end):
+        """Zero pad the start and end of a signal."""
+        cls = type(self)
+        pad_start_length = cls._seconds_to_samples(pad_start, self.fs)
+        pad_end_length = cls._seconds_to_samples(pad_end, self.fs)
+
+        padded_data = np.pad(
+            data,
+            pad_width=((pad_start_length, pad_end_length), (0, 0)),
+            mode="constant",
+            constant_values=0
+        )
+        return padded_data
 
     #### WAV Files
 
@@ -86,7 +158,7 @@ class SweptSine:
             raise ValueError(
                 f"Measurement {filepath} sample rate ({fs}) does not match the sweep sample rate ({self.fs})."
             )
-        measurement = self.enforce_2d_row_major(
+        measurement = self._enforce_2d_row_major(
             measurement
         )  # wavfile.read returns mono as 1D
         return measurement
@@ -126,8 +198,8 @@ class SweptSine:
     @staticmethod
     def _generate_inverse(t, L, sweep):
         """Generate the inverse filter using Farina's amplitude-modulated, time-reversed method (2000)."""
-        env = np.exp(t * (1 / L))
-        inverse = np.flip(np.copy(sweep), axis=0) / env
+        envelope = np.exp(t * (1 / L))
+        inverse = np.flip(np.copy(sweep), axis=0) / envelope
         return inverse
 
     #### Sweep Analysis
@@ -152,7 +224,7 @@ class SweptSine:
     def deconvolve(self, measurement):
         """Deconvolve the measurement with the inverse filter and optionally normalise the output impulse response."""
 
-        measurement = self.enforce_2d_row_major(measurement)
+        measurement = self._enforce_2d_row_major(measurement)
 
         impulse_response = self._deconvolution(measurement)
 

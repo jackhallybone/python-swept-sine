@@ -29,23 +29,62 @@ def test_init_from_sweep_wav(tmp_path):
 #### Utils
 
 
-def enforce_2d_row_major():
+def test__enforce_2d_row_major():
     """Verify that audio data can be forced into 2D (samples, channels) shape."""
-    assert SweptSine.enforce_2d_row_major(np.ones(48000)).shape == (48000, 1)  # 1D mono
-    assert SweptSine.enforce_2d_row_major(np.ones((48000, 1))).shape == (
+    assert SweptSine._enforce_2d_row_major(np.ones(48000)).shape == (48000, 1)  # 1D mono
+    assert SweptSine._enforce_2d_row_major(np.ones((48000, 1))).shape == (
         48000,
         1,
     )  # 2D mono
-    assert SweptSine.enforce_2d_row_major(np.ones((2, 48000))).shape == (
+    assert SweptSine._enforce_2d_row_major(np.ones((2, 48000))).shape == (
         48000,
         2,
     )  # 2D swapped
-    assert SweptSine.enforce_2d_row_major(np.ones((48000, 2))).shape == (
+    assert SweptSine._enforce_2d_row_major(np.ones((48000, 2))).shape == (
         48000,
         2,
     )  # 2D correct
     with pytest.raises(ValueError):
-        SweptSine.enforce_2d_row_major(np.ones((48000, 1, 1)))  # 3D
+        SweptSine._enforce_2d_row_major(np.ones((48000, 1, 1)))  # 3D
+
+
+def test__seconds_to_samples():
+    """Check conversion from seconds to samples using sampling rate."""
+    assert SweptSine._seconds_to_samples(0.5, 48000) == 24000
+
+def test__samples_to_seconds():
+    """Check conversion from a number of samples to seconds using sampling rate."""
+    assert SweptSine._samples_to_seconds(24000, 48000) == 0.5
+
+def test__fade_in_out():
+    """Verify that a signal can be faded in and out."""
+    swept_sine = SweptSine(20000, 100, 1000, 4)
+    test_data = np.ones(20000) # 1 second of ones
+    faded_data = swept_sine._fade_in_out(test_data, 0.5, 0.5, curve="linear")
+    assert faded_data[0, 0] == 0
+    assert faded_data[10000, 0] == 1
+    assert faded_data[-1, 0] == 0
+
+test_data = [
+    (100, 0, 1, "linear"),
+    (100, 1, 0, "linear"),
+    (100, 0, 1, "cosine"),
+    (100, 1, 0, "cosine"),]
+@pytest.mark.parametrize("length, start, end, curve", test_data)
+def test__fade_curve(length, start, end, curve):
+    """Verify drawing curves with defined start and end points"""
+    curve = SweptSine._fade_curve(length, start, end, curve)
+    assert curve[0] == start
+    assert curve[length//2] == pytest.approx(np.abs(start-end)/2, 0.1)
+    assert curve[-1] == end
+
+
+def test__zero_pad_start_end():
+    swept_sine = SweptSine(20000, 100, 1000, 4)
+    test_data = np.ones((20000, 1))
+    padded_test_data = swept_sine._zero_pad_start_end(test_data, 0.5, 2)
+    assert padded_test_data.shape == (70000, 1)
+
 
 
 #### WAV Files
