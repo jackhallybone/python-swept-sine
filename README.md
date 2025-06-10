@@ -23,7 +23,7 @@ During the init the sweep parameters are calculated and the sweep (`my_swept_sin
 
 ## Measuring using .wav (for example in a DAW)
 
-So that the signal generation and analysis can happen separately, the generated sweep can be saved to a wav file.
+Signal generation and analysis can be separated by working with .wav files. For example if the measurement recording is done in a DAW.
 
 ```python
 my_swept_sine.save_sweep_as_wav(path="sweeps", prefix="my_sweep_name")
@@ -31,10 +31,10 @@ my_swept_sine.save_sweep_as_wav(path="sweeps", prefix="my_sweep_name")
 # creates "sweeps/my_sweep_name-params_48000_20_20000_10_-6_0.5_0.5_cosine_1_10.wav"
 ```
 
-The sweep parameters are encoded into the filename so an instance of an identical sweep, including the computed parameters and inverse filter, can be re-created automatically from the file. Measurements can also be deconvolved directly from file.
+The sweep parameters are encoded into the filename so an instance of an identical sweep, including the computed parameters and inverse filter, can be re-created automatically from the filename. Measurements can be deconvolved directly from file.
 
 ```python
-new_swept_sine = SweptSine.init_from_sweep_wav(
+new_swept_sine = SweptSine.init_from_sweep_filename(
     "sweeps/my_sweep_name-params_params_48000_20_20000_10_-6_0.5_0.5_cosine_1_10.wav"
 )
 

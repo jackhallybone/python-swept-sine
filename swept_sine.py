@@ -6,9 +6,8 @@ from scipy.io import wavfile
 
 
 class SweptSine:
-    """List of the parameters/arguments required to re-create a sweep."""
 
-    re_init_parameters = {
+    re_init_parameters = { # The parameters/arguments required to re-create a sweep.
         "fs": int,
         "f1": float,
         "f2": float,
@@ -87,9 +86,9 @@ class SweptSine:
             self.sweep = self._scale_by_dBFS(self.sweep, self.sweep_dBFS)
 
     @classmethod
-    def init_from_sweep_wav(cls, filepath):
-        """Create an instance from the init sweep parameters found in the filepath."""
-        params = cls._parameters_from_wav_filepath(filepath)
+    def init_from_sweep_filename(cls, filepath):
+        """Create an instance from the sweep parameters found in the filename."""
+        params = cls._parameters_from_wav_filename(filepath)
         return cls(*params)
 
     #### Utils
@@ -186,8 +185,8 @@ class SweptSine:
         return filepath
 
     @classmethod
-    def _parameters_from_wav_filepath(cls, filepath):
-        """Extract the sweep parameters from a filepath created with `_construct_wav_filepath()`."""
+    def _parameters_from_wav_filename(cls, filepath):
+        """Extract the sweep parameters from a filename created with `_construct_wav_filepath()`."""
         filename = Path(filepath).stem
         parts = filename.split("_")
         params = parts[-len(cls.re_init_parameters) :]
