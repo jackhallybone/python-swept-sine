@@ -7,7 +7,7 @@ from scipy.io import wavfile
 
 class SweptSine:
 
-    re_init_parameters = { # The parameters/arguments required to re-create a sweep.
+    re_init_parameters = {  # The parameters/arguments required to re-create a sweep.
         "fs": int,
         "f1": float,
         "f2": float,
@@ -322,3 +322,24 @@ class SweptSine:
         end_idx = harmonic_idx + max_half_window
 
         return impulse_response[start_idx:end_idx]
+
+    #### Convolve
+
+    @classmethod
+    def convolve(cls, data, impulse_response, N=None, next_fast_len=False):
+        """Convolve a signal with an impulse response."""
+        data = cls._enforce_2d_row_major(data)
+        impulse_response = cls._enforce_2d_row_major(impulse_response)
+
+        if N is None:
+            N = data.shape[0] + impulse_response.shape[0] - 1
+
+        if next_fast_len:
+            N = scipy.fft.next_fast_len(N, real=True)
+
+        X = scipy.fft.rfft(data, n=N, axis=0)
+        H = scipy.fft.rfft(impulse_response, n=N, axis=0)
+        Y = X * H
+        y = scipy.fft.irfft(Y, n=N, axis=0)
+
+        return y

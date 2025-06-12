@@ -40,3 +40,12 @@ new_swept_sine = SweptSine.init_from_sweep_filename(
 
 impulse_response = new_swept_sine.deconvolve_from_wav("measurement.wav")
 ```
+
+
+## Convolution
+
+The `SweptSine.convolve` function can be used for auralisation, for example using  impulse responses from the [OpenAIR database](https://www.openair.hosted.york.ac.uk/?page_id=702).
+
+```python
+auralised_signal = SweptSine.convolve(anechoic_signal, impulse_response)
+```

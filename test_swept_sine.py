@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from numpy.testing import assert_array_equal
+from numpy.testing import assert_allclose, assert_array_equal
 
 from swept_sine import SweptSine
 
@@ -18,11 +18,11 @@ def test_init_calculations_are_deterministic():
     assert_array_equal(SweptSine(20000, 100, 1000, 4).sweep, swept_sine.sweep)
 
 
-def test_init_from_sweep_wav(tmp_path):
+def test_init_from_sweep_filename(tmp_path):
     """Verify that an instance can be re-created from the parameters in a filename."""
     swept_sine = SweptSine(20000, 100, 1000, 4, -6, 1, 2, "linear", 2, 2)
     filepath = swept_sine.save_sweep_as_wav(path=tmp_path, prefix="init_test")
-    new_swept_sine = SweptSine.init_from_sweep_wav(filepath)
+    new_swept_sine = SweptSine.init_from_sweep_filename(filepath)
     assert all(
         getattr(swept_sine, key) == getattr(new_swept_sine, key)
         for key in SweptSine.re_init_parameters
@@ -125,10 +125,10 @@ def test__construct_wav_filepath():
     )
 
 
-def test__parameters_from_wav_filepath():
+def test__parameters_from_wav_filename():
     """Verify that the sweep parameters can be read from a properly formatted filename."""
     filepath = "test/path/my_sweep-params_20000_100_1000_4_-6_1_2_linear_2_2.wav"
-    assert SweptSine._parameters_from_wav_filepath(filepath) == [
+    assert SweptSine._parameters_from_wav_filename(filepath) == [
         20000,
         100,
         1000,
@@ -243,3 +243,19 @@ def test_deconvolve():
 # def test_get_fundamental_impulse_response():
 
 # def test_get_harmonic_impulse_response():
+
+
+#### Convolve
+
+
+def test_convolve():
+    """Verify the convolution output shape and response to dirac."""
+    rng = np.random.default_rng()
+    data = rng.uniform(-1, 1, 20000)
+    dirac = [1] + [0] * 999  # len=1000
+    convolution = SweptSine.convolve(data, dirac)
+    assert convolution.ndim == 2
+    assert len(convolution) == 20999
+    assert_allclose(convolution[: len(data), 0], data)
+    next_fast_len = SweptSine.convolve([1], [0], N=1234, next_fast_len=True)
+    assert len(next_fast_len) == 1250
