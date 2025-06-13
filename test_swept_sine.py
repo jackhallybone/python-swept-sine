@@ -200,7 +200,7 @@ def test_sweep_harmonic_phase_synchronicity():
         )  # zero-cross
 
 
-#### Sweep Analysis
+#### Analysis
 
 
 def test_sweep_frequency_at_time():
@@ -213,32 +213,32 @@ def test_sweep_frequency_at_time():
     assert swept_sine.sweep_frequency_at_time(delta_t_f3) == pytest.approx(f1 * 3)
 
 
-#### Analysis
+def test_get_bin_idx_closest_to_f():
+    freqs = np.array([2, 4, 6, 8, 10])
+    idx = SweptSine.get_bin_idx_closest_to_f(freqs, 7)
+    assert idx == 2  # the bin with 6 in it
 
 
-def test_N():
+# def test_sweep_passband():
+
+
+def test_deconvolution_N():
     swept_sine = SweptSine(20000, 10, 500, 1)
     assert len(swept_sine.sweep) == len(swept_sine.inverse) == len(swept_sine._t)
-    assert swept_sine.N == len(swept_sine._t) + len(swept_sine._t) - 1
-
-
-def test__deconvolution():
-    """Verify (only) that the output shape of the deconvolution is correct."""
-    swept_sine = SweptSine(20000, 10, 500, 1)
-    impulse_response = swept_sine._deconvolution(swept_sine.sweep)
-    assert impulse_response.shape == (swept_sine.N, 1)
+    assert swept_sine.deconvolution_N == len(swept_sine._t) + len(swept_sine._t) - 1
 
 
 def test_deconvolve():
     """Verify (only) that the normalisation of the deconvolution is correct."""
     swept_sine = SweptSine(20000, 10, 500, 1)
     reference_impulse_response = swept_sine.deconvolve(swept_sine.sweep)
+    assert reference_impulse_response.shape == (swept_sine.deconvolution_N, 1)
     assert np.max(np.abs(reference_impulse_response)) == pytest.approx(1)
     attenuated_impulse_response = swept_sine.deconvolve(swept_sine.sweep * 0.5)
     assert np.max(np.abs(attenuated_impulse_response)) == pytest.approx(0.5)
 
 
-# def test_impulse_response_frequency_response():
+# def test_frequency_response():
 
 # def test_nth_harmonic_time_delay():
 

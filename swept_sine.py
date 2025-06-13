@@ -77,9 +77,17 @@ class SweptSine:
                 self.inverse, self.pad_end, self.pad_start
             )
 
-        # Precompute components of the deconvolution to save time later
-        self._X_inverse = scipy.fft.rfft(self.inverse, n=self.N, axis=0)
-        self._reference_impulse_response = self._deconvolution(self.sweep)
+        # Precompute parts of the deconvolution and normalisation
+        self._X_inverse = scipy.fft.rfft(self.inverse, n=self.deconvolution_N, axis=0)
+        self._reference_impulse_response = self.deconvolve(self.sweep, normalise=False)
+        (
+            self._reference_frequency_response_freqs,
+            self._reference_frequency_response_mag_dB,
+        ) = self.frequency_response(
+            self._reference_impulse_response
+            / np.max(np.abs(self._reference_impulse_response)),  # normalised IR
+            normalise=False,
+        )
 
         # Scale sweep to dBFS
         if self.sweep_dBFS != 0:
@@ -258,50 +266,88 @@ class SweptSine:
         inverse = np.flip(np.copy(sweep), axis=0) / envelope
         return inverse
 
-    #### Sweep Analysis
+    #### Analysis
 
     def sweep_frequency_at_time(self, t):
         """Calculate the frequency of the sweep at a given time (Novak et al. 2015, eq. 35)."""
         return self.f1 * np.exp(t / self._L)
 
-    #### Analysis
+    @staticmethod
+    def get_bin_idx_closest_to_f(freqs, f):
+        """Find the index of the bin closed to a given frequency."""
+        return (np.abs(freqs - f)).argmin(axis=0)
+
+    def sweep_passband(self, reference_f=None, tolerance_dB=0.5):
+        """Find the actual passband of the sweep based on a deviation tolerance from a reference frequency."""
+        freqs = self._reference_frequency_response_freqs
+        mag_dB = self._reference_frequency_response_mag_dB
+
+        if reference_f is None:
+            reference_f = (
+                self.f2 - self.f1
+            ) / 2  # midpoint of the sweep frequency range
+
+        idx_ref = self.get_bin_idx_closest_to_f(freqs, reference_f)
+        peak_dB = mag_dB[idx_ref]
+
+        lower = np.abs(mag_dB[:idx_ref][::-1] - peak_dB) > tolerance_dB
+        idx_low = idx_ref - np.argmax(lower)
+
+        upper = np.abs(mag_dB[idx_ref:] - peak_dB) > tolerance_dB
+        idx_high = idx_ref + np.argmax(upper)
+
+        return freqs[idx_low], freqs[idx_high]
 
     @property
-    def N(self):
+    def deconvolution_N(self):
         return len(self.sweep) + len(self.inverse) - 1
 
-    def _deconvolution(self, measurement):
-        """Perform the matched linear deconvolution using the precomputed inverse filter (X~)."""
-        N = self.N
-        Y = scipy.fft.rfft(measurement, n=N, axis=0)
-        impulse_response = scipy.fft.irfft(Y * self._X_inverse, n=N, axis=0)
-        return impulse_response
-
     def deconvolve(self, measurement, normalise=True):
-        """Deconvolve the measurement with the inverse filter and optionally normalise the output impulse response."""
+        """Deconvolve the measurement with the inverse filter and optionally normalise against the original sweep."""
 
         measurement = self._enforce_2d_row_major(measurement)
 
-        impulse_response = self._deconvolution(measurement)
+        N = self.deconvolution_N
+        Y = scipy.fft.rfft(measurement, n=N, axis=0)
+        impulse_response = scipy.fft.irfft(Y * self._X_inverse, n=N, axis=0)
 
         if normalise:
-            impulse_response /= np.max(
-                np.abs(self._reference_impulse_response)
-            )
+            impulse_response /= np.max(np.abs(self._reference_impulse_response))
 
         return impulse_response
 
-    def impulse_response_frequency_response(self, impulse_response, floor_dB=-120):
-        frequency_response = np.abs(
-            scipy.fft.rfft(impulse_response, n=len(impulse_response))
-        )
+    def frequency_response(
+        self,
+        impulse_response,
+        N=None,
+        floor_dB=-120,
+        normalise=True,
+        normalise_tolerance_dB=1,
+    ):
+        """Transform an impulse response into the frequency and magnitude frequency response and optionally normalise against the original sweep."""
+        if N is None:
+            N = len(impulse_response)
 
-        frequency_response = np.clip(frequency_response, 10 ** (floor_dB / 20), None)
-        frequency_response_dB = 20 * np.log10(frequency_response)
+        y = scipy.fft.rfft(impulse_response, n=N, axis=0)
 
-        bin_frequencies = np.linspace(0, self.fs / 2, num=len(frequency_response_dB))
+        mag = np.abs(y)
+        mag = np.maximum(mag, np.finfo(float).eps)  # avoid 0s
+        mag_dB = 20 * np.log10(mag)
 
-        return bin_frequencies, frequency_response_dB
+        freqs = scipy.fft.rfftfreq(N, d=1 / self.fs)
+
+        if normalise:
+            # Normalise against the passband of the reference
+            lower, upper = self.sweep_passband(tolerance_dB=normalise_tolerance_dB)
+            passband_mask = (self._reference_frequency_response_freqs >= lower) & (
+                self._reference_frequency_response_freqs < upper
+            )
+            ref_mags = self._reference_frequency_response_mag_dB[passband_mask, :]
+            mag_dB -= np.mean(ref_mags, axis=0)
+
+        mag_dB = np.clip(mag_dB, floor_dB, None)
+
+        return freqs, mag_dB
 
     def nth_harmonic_time_delay(self, n):
         """Calculate the time delay in seconds for the nth harmonic (Novak et al. 2015, eq. 34)."""
@@ -319,8 +365,10 @@ class SweptSine:
 
     def get_harmonic_impulse_response(self, impulse_response, n):
         """Get the (centred) impulse response of the nth harmonic."""
-        harmonic_idx = self.N // 2 - self.nth_harmonic_sample_delay(n)
-        next_harmonic_idx = self.N // 2 - self.nth_harmonic_sample_delay(n + 1)
+        harmonic_idx = self.deconvolution_N // 2 - self.nth_harmonic_sample_delay(n)
+        next_harmonic_idx = self.deconvolution_N // 2 - self.nth_harmonic_sample_delay(
+            n + 1
+        )
 
         max_half_window = (harmonic_idx - next_harmonic_idx) // 2
         start_idx = harmonic_idx - max_half_window
