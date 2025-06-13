@@ -123,6 +123,8 @@ class SweptSine:
 
     def _fade_in_out(self, data, fade_in, fade_out, fade_shape="cosine"):
         """Fade a signal in from 0 and/or out to 0."""
+        data = self._enforce_2d_row_major(data)
+
         cls = type(self)
         fade_in_length = cls._seconds_to_samples(fade_in, self.fs)
         fade_out_length = cls._seconds_to_samples(fade_out, self.fs)
@@ -133,33 +135,35 @@ class SweptSine:
                 f"({cls._samples_to_seconds(data.shape[0], self.fs)}s)."
             )
 
-        envelope = np.ones(data.shape[0])
+        envelope = np.ones((data.shape[0], 1))
+
         if fade_in_length > 0:
-            envelope[:fade_in_length] = cls._create_fade_envelope(
+            envelope[:fade_in_length, :] = cls._create_fade_envelope(
                 fade_in_length, 0, 1, fade_shape
             )
         if fade_out_length > 0:
-            envelope[-fade_out_length:] = cls._create_fade_envelope(
+            envelope[-fade_out_length:, :] = cls._create_fade_envelope(
                 fade_out_length, 1, 0, fade_shape
             )
 
-        faded_data = data * envelope[:, np.newaxis]
+        faded_data = data * envelope
+
         return faded_data
 
     @staticmethod
     def _create_fade_envelope(length, start, end, fade_shape):
         """Draw a shaped envelope for fading a signal."""
         if fade_shape == "linear":
-            return np.linspace(start, end, length, endpoint=True)
+            curve = np.linspace(start, end, length, endpoint=True)
         elif fade_shape == "cosine":
             x = np.linspace(0, 1, length)
             curve = 0.5 * (1 - np.cos(np.pi * x))
             curve = curve * (end - start) + start
-            return curve
         else:
             raise ValueError(
                 f"Fade shape must be 'linear' or 'cosine' not '{fade_shape}'."
             )
+        return curve[:, np.newaxis]
 
     def _zero_pad_start_end(self, data, pad_start, pad_end):
         """Zero pad the start and end of a signal."""
@@ -273,16 +277,17 @@ class SweptSine:
         impulse_response = scipy.fft.irfft(Y * self._X_inverse, n=N, axis=0)
         return impulse_response
 
-    def deconvolve(self, measurement):
+    def deconvolve(self, measurement, normalise=True):
         """Deconvolve the measurement with the inverse filter and optionally normalise the output impulse response."""
 
         measurement = self._enforce_2d_row_major(measurement)
 
         impulse_response = self._deconvolution(measurement)
 
-        impulse_response /= np.max(
-            np.abs(self._reference_impulse_response)
-        )  # normalise
+        if normalise:
+            impulse_response /= np.max(
+                np.abs(self._reference_impulse_response)
+            )
 
         return impulse_response
 

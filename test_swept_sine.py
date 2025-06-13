@@ -77,11 +77,13 @@ def test__samples_to_seconds():
 def test__fade_in_out():
     """Verify that a signal can be faded in and out."""
     swept_sine = SweptSine(20000, 100, 1000, 4)
-    test_data = np.ones(20000)  # 1 second of ones
-    faded_data = swept_sine._fade_in_out(test_data, 0.5, 0.5, fade_shape="linear")
-    assert faded_data[0, 0] == 0
-    assert faded_data[10000, 0] == 1
-    assert faded_data[-1, 0] == 0
+    test_data = np.ones((20000, 1))  # 1 second of ones
+    unfaded_test_data = swept_sine._fade_in_out(test_data, 0, 0, fade_shape="linear")
+    assert_array_equal(unfaded_test_data, test_data)
+    faded_test_data = swept_sine._fade_in_out(test_data, 0.5, 0.5, fade_shape="linear")
+    assert faded_test_data[0, 0] == 0
+    assert faded_test_data[10000, 0] == 1
+    assert faded_test_data[-1, 0] == 0
 
 
 data_test__create_fade_envelope = [
@@ -106,6 +108,8 @@ def test__create_fade_envelope(length, start, end, fade_shape):
 def test__zero_pad_start_end():
     swept_sine = SweptSine(20000, 100, 1000, 4)
     test_data = np.ones((20000, 1))
+    unpadded_test_data = swept_sine._zero_pad_start_end(test_data, 0, 0)
+    assert_array_equal(unpadded_test_data, test_data)
     padded_test_data = swept_sine._zero_pad_start_end(test_data, 0.5, 2)
     assert padded_test_data.shape == (70000, 1)
 
