@@ -209,19 +209,24 @@ class SweptSine:
         return cast_params
 
     def save_sweep_as_wav(self, path=".", prefix="sweep"):
-        """Save the sweep signal to a wav file with the parameters appended to the filename."""
+        """Save the sweep signal to an f32 wav file with the parameters appended to the filename."""
         filepath = self._construct_wav_filepath(path, prefix)
-        wavfile.write(filepath, self.fs, self.sweep)
+        wavfile.write(filepath, self.fs, self.sweep.astype(np.float32))  # as f32
         return filepath
 
     def _read_from_wav(self, filepath):
-        """Read an audio file from a wav file and enforce 2D (samples, channels) shape."""
+        """Read an audio file from an f32 wav file and enforce 2D (samples, channels) shape."""
         filepath = Path(filepath)
         fs, measurement = wavfile.read(filepath)
         if fs != self.fs:
             raise ValueError(
                 f"Measurement {filepath} sample rate ({fs}) does not match the sweep sample rate ({self.fs})."
             )
+        if measurement.dtype != np.float32:
+            raise ValueError(
+                f"Audio loaded as .wav must be in float32 format ({filepath} is of type {measurement.dtype})."
+            )
+        measurement = measurement.astype(np.float64)
         measurement = self._enforce_2d_row_major(
             measurement
         )  # wavfile.read returns mono as 1D

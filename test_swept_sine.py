@@ -147,11 +147,11 @@ def test__parameters_from_wav_filename():
 
 
 def test_save_sweep_as_wav_and__read_from_wav(tmp_path):
-    """Verify that saving and reading from to wav maintains the sweep signal format, etc."""
+    """Verify that saving and reading from to f32 wav maintains the sweep signal format, etc."""
     swept_sine = SweptSine(20000, 100, 1000, 4)
     filepath = swept_sine.save_sweep_as_wav(path=tmp_path, prefix="save_test")
     data = swept_sine._read_from_wav(filepath)  # enforces 2D (samples, channels) shape
-    assert_array_equal(data, swept_sine.sweep)
+    assert_allclose(data, swept_sine.sweep)
 
 
 def test_deconvolve_from_wav(tmp_path):
@@ -160,7 +160,8 @@ def test_deconvolve_from_wav(tmp_path):
     filepath = swept_sine.save_sweep_as_wav(path=tmp_path, prefix="deconvolve_test")
     wav_impulse_response = swept_sine.deconvolve_from_wav(filepath)
     direct_impulse_response = swept_sine.deconvolve(swept_sine.sweep)
-    assert_array_equal(wav_impulse_response, direct_impulse_response)
+    # values will be small so only check the absolute difference is within f32 precision
+    assert_allclose(wav_impulse_response, direct_impulse_response, rtol=0, atol=1e-7)
 
 
 #### Sweep Parameters
