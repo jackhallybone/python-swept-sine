@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 
-from swept_sine import SweptSine
+from sweptsine import SweptSine
 
 swept_sine = SweptSine(
     fs=20000,

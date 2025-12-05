@@ -4,8 +4,14 @@ A python implementation of the synchronised swept sine based on [Novak et al. 20
 
 ## Getting started
 
+```
+pip install -e .
+```
+
 ```python
-from swept_sine import SweptSine
+import sounddevice as sd
+
+from sweptsine import SweptSine
 
 my_swept_sine = SweptSine(
     fs=48000, f1=20, f2=20000, duration=10

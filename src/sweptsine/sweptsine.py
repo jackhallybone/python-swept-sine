@@ -36,7 +36,7 @@ class SweptSine:
 
         if f2 <= f1:
             # https://www.ap.com/blog/why-are-chirps-always-swept-from-low-to-high
-            raise ValueError("Sweep must be high to low (f2>f1)")
+            raise ValueError("Sweep must be low to high (f2>f1)")
 
         self.fs = fs
         self.f1 = f1
